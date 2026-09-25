@@ -6,20 +6,21 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import ActionResult, EntryPayload, PageResult
-from app.services.irradiance import IrradianceService
+from app.services.irradiance import STATUS_ORDER, IrradianceService
 
 router = APIRouter(prefix="/api/irradiance", tags=["辐照监测"])
 
 service = IrradianceService()
 
 LIST_FIELDS = ["测点编号", "测点位置", "总辐照度", "直射辐照度", "组件温度", "环境温度", "采集时间", "测点状态"]
-STATUSES = ["正常采集", "数据缺测", "传感器故障", "已校准"]
+# 状态序列以 services/irradiance.py 的判定规则为准，列表入口直接引用同一份
+STATUSES = STATUS_ORDER
 
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按测点编号检索"),
-    status: str | None = Query(default=None, description="正常采集、数据缺测、传感器故障、已校准"),
+    status: str | None = Query(default=None, description="、".join(STATUSES)),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:

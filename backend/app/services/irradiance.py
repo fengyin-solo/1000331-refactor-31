@@ -7,9 +7,47 @@ from app.store import store
 
 MODULE = "irradiance"
 REQUIRED_FIELDS = ["测点编号", "测点位置", "总辐照度"]
-STATUS_ORDER = ["正常采集", "数据缺测", "传感器故障", "已校准"]
-ACTION_RULES = {"确认采集": "正常采集", "登记缺测": "数据缺测", "提交校准": "已校准"}
+
+# ---- 测点判定规则：列表筛选、动作流转、补录登记三个入口共用这一份 ----
+MISSING_STATUS = "数据缺测"
+FAULT_STATUS = "传感器故障"
+STATUS_ORDER = ["正常采集", MISSING_STATUS, FAULT_STATUS, "已校准"]
+ACTION_RULES = {"确认采集": "正常采集", "登记缺测": MISSING_STATUS, "提交校准": "已校准"}
 NEGATIVE_ACTIONS = []
+
+
+def initial_status() -> str:
+    """补录或新登记测点的起始状态。"""
+    return STATUS_ORDER[0]
+
+
+def is_known_status(status: str) -> bool:
+    """状态是否在允许的序列里。"""
+    return status in STATUS_ORDER
+
+
+def is_terminal_status(status: str) -> bool:
+    """序列末尾（已校准）是终态，到达后测点不再 pending。"""
+    return status == STATUS_ORDER[-1]
+
+
+def target_status_for(action: str) -> str | None:
+    """动作对应的目标状态；动作不在可执行范围时返回 None。"""
+    return ACTION_RULES.get(action)
+
+
+def resolve_state(status: str, action: str | None = None) -> dict[str, Any]:
+    """由状态推出 pending/abnormal，三个入口都从这里取判定结果。"""
+    return {
+        "status": status,
+        "pending": not is_terminal_status(status),
+        "abnormal": action in NEGATIVE_ACTIONS,
+    }
+
+
+def matches_status(row: dict[str, Any], status: str) -> bool:
+    """列表筛选的判定口径：按测点当前状态精确匹配。"""
+    return row.get("status") == status
 
 
 class IrradianceService:
@@ -25,7 +63,7 @@ class IrradianceService:
         if keyword:
             rows = [row for row in rows if keyword in str(row.get("测点编号", ""))]
         if status:
-            rows = [row for row in rows if row.get("status") == status]
+            rows = [row for row in rows if matches_status(row, status)]
         total = len(rows)
         start = max(page - 1, 0) * size
         return rows[start:start + size], total
@@ -40,9 +78,7 @@ class IrradianceService:
         rows = store.rows(MODULE)
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
         entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
-        entry["status"] = STATUS_ORDER[0]
-        entry["pending"] = True
-        entry["abnormal"] = False
+        entry.update(resolve_state(initial_status()))
         rows.append(entry)
         return entry, []
 
@@ -50,12 +86,10 @@ class IrradianceService:
         entry = store.find(MODULE, entry_id)
         if entry is None:
             return None, f"辐照测点 {entry_id} 不存在或已归档"
-        if action not in ACTION_RULES:
+        target = target_status_for(action)
+        if target is None:
             return None, f"动作「{action}」不属于辐照监测可执行范围"
-        target = ACTION_RULES[action]
-        if target not in STATUS_ORDER:
+        if not is_known_status(target):
             return None, f"目标状态「{target}」不在允许的状态序列里"
-        entry["status"] = target
-        entry["pending"] = target != STATUS_ORDER[-1]
-        entry["abnormal"] = action in NEGATIVE_ACTIONS
+        entry.update(resolve_state(target, action))
         return entry, f"辐照测点已{action}"
