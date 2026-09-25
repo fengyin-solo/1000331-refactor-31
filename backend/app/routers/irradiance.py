@@ -23,7 +23,10 @@ def list_entries(
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
-    """按测点编号与状态过滤辐照监测列表；没有数据时返回空页，不报错。"""
+    """按测点编号与状态过滤辐照监测列表；没有数据时返回空页，不报错。
+
+    每条记录附带「判定结果」，由 services 里的公用判定口径按当前数值算出。
+    """
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
@@ -50,7 +53,10 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条辐照测点执行确认采集、登记缺测、提交校准；不允许的动作会被拦下并说明原因。"""
+    """对单条辐照测点执行确认采集、登记缺测、提交校准；不允许的动作会被拦下并说明原因。
+
+    返回的记录附带「判定结果」，与列表、登记入口共用同一份判定口径。
+    """
     action = str(payload.values.get("action") or "").strip()
     entry, message = service.run_action(entry_id, action)
     if entry is None:
